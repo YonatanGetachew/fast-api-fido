@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+sqlalchemy
+fido2 @ git+https://github.com/Yubico/python-fido2.git
+cbor2
+
+
+

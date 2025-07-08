@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+fido_users.db
+
+# Node.js
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+node_modules/
+build/
+dist/
+
+# System
+.DS_Store
+
+# Others
+*.log
+
