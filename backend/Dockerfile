@@ -1,23 +1,16 @@
-# Use official slim image
 FROM python:3.10-slim
+
+# Install git + any build tools required for dependencies
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install git for pip install from GitHub
-RUN apt-get update && apt-get install -y git
+COPY backend/requirements.txt ./
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
-COPY . .
+COPY backend ./
 
-# Expose port
-ENV PORT=8080
-EXPOSE 8080
-
-# Start FastAPI app with uvicorn
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
 
 
