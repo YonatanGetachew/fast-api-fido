@@ -6,9 +6,7 @@ function base64urlToUint8Array(base64url) {
     throw new Error("base64url is undefined");
   }
   const padding = '='.repeat((4 - base64url.length % 4) % 4);
-  const base64 = (base64url + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
+  const base64 = (base64url + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = window.atob(base64);
   const output = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) {
@@ -26,27 +24,36 @@ function arrayBufferToBase64Url(buffer) {
 
 function LoginPage() {
   const [fcn, setFcn] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleProceed = async () => {
-    if (fcn.length !== 16) {
-      alert("Please enter a valid 16-character FCN number");
+    if (!/^\d{16}$/.test(fcn)) {
+      alert("Please enter a valid 16-digit FCN number");
       return;
     }
 
+    setLoading(true);
     try {
-      const response = await fetch("https://fido-frontend-352144635977.us-central1.run.app/register/begin", {
+      // Step 1: Begin registration
+      const response = await fetch("http://192.168.8.83:8080/register/begin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: fcn })
       });
 
       const optionsBuffer = await response.arrayBuffer();
-      const decodedCBOR = CBOR.decode(optionsBuffer);
+
+      let decodedCBOR;
+      try {
+        decodedCBOR = CBOR.decode(optionsBuffer);
+      } catch (err) {
+        console.error("CBOR decoding failed:", err);
+        throw new Error("Invalid CBOR response from server.");
+      }
 
       console.log("Decoded CBOR registration options:", decodedCBOR);
 
       const publicKey = decodedCBOR.publicKey;
-
       if (!publicKey || !publicKey.challenge || !publicKey.user || !publicKey.user.id) {
         throw new Error("Invalid publicKey options received");
       }
@@ -63,7 +70,12 @@ function LoginPage() {
 
       console.log("Processed registration options for navigator.credentials.create:", publicKey);
 
+      // Step 2: Create credential
       const credential = await navigator.credentials.create({ publicKey });
+
+      if (!credential) {
+        throw new Error("Credential creation failed or was cancelled");
+      }
 
       console.log("Credential created:", credential);
 
@@ -75,10 +87,12 @@ function LoginPage() {
           attestationObject: arrayBufferToBase64Url(credential.response.attestationObject),
         },
         type: credential.type,
-        username: fcn
+        username: fcn,
+        clientExtensionResults: credential.getClientExtensionResults?.() || {}
       };
 
-      const completeResponse = await fetch("/register/complete", {
+      // Step 3: Send registration completion
+      const completeResponse = await fetch("http://192.168.8.83:8080/register/complete", {
         method: "POST",
         headers: { "Content-Type": "application/cbor" },
         body: CBOR.encode(attestationResponse)
@@ -88,11 +102,17 @@ function LoginPage() {
       const decoded = CBOR.decode(completeResultBuffer);
 
       console.log("Registration complete response:", decoded);
-      alert("Registration successful!");
 
+      if (decoded?.status === "Registration successful") {
+        alert("Registration successful!");
+      } else {
+        alert("Unexpected response from server.");
+      }
     } catch (error) {
       console.error("Error:", error);
       alert("Error during registration. See console.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -100,7 +120,10 @@ function LoginPage() {
     <div className="container">
       <h1>Welcome to the</h1>
       <h2>Fayda Resident Portal!</h2>
-      <p>Here, you can effortlessly manage your identity details, enroll for services, and update your personal information with just a few clicks.</p>
+      <p>
+        Here, you can effortlessly manage your identity details, enroll for services,
+        and update your personal information with just a few clicks.
+      </p>
 
       <div className="login-form">
         <h3>Log In</h3>
@@ -110,9 +133,11 @@ function LoginPage() {
           maxLength="16"
           value={fcn}
           onChange={(e) => setFcn(e.target.value)}
-          placeholder="Enter 16-character FCN Number"
+          placeholder="Enter 16-digit FCN Number"
         />
-        <button onClick={handleProceed}>Proceed</button>
+        <button onClick={handleProceed} disabled={loading}>
+          {loading ? "Processing..." : "Proceed"}
+        </button>
       </div>
     </div>
   );
