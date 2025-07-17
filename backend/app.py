@@ -7,7 +7,7 @@ from fido2.server import Fido2Server
 from fido2.webauthn import PublicKeyCredentialRpEntity, UserVerificationRequirement
 from fido2 import cbor
 from fido2.utils import websafe_encode
-import os
+import time
 import traceback
 
 # Database setup
@@ -25,11 +25,8 @@ class UserCredential(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# FastAPI app setup
+# FastAPI app
 app = FastAPI()
-#frontend_path = os.path.join(os.path.dirname(__file__), "frontend_build")
-#app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,8 +36,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# FIDO2 server setup
-rp = PublicKeyCredentialRpEntity(id="localhost", name="Fayda Resident Portal Demo")
+# FIDO2 config
+rp = PublicKeyCredentialRpEntity(id="localhost", name="Fayda Resident Portal")
 server = Fido2Server(rp)
 
 # DB dependency
@@ -51,8 +48,18 @@ def get_db():
     finally:
         db.close()
 
-# In-memory state store
+# In-memory state with TTL
 state_store = {}
+
+def set_state(username, state):
+    state_store[username] = (state, time.time())
+
+def get_state(username):
+    state, ts = state_store.get(username, (None, 0))
+    if time.time() - ts > 300:  # expire after 5 minutes
+        state_store.pop(username, None)
+        return None
+    return state
 
 def jsonify_registration_options(options):
     def convert(obj):
@@ -86,12 +93,11 @@ async def register_begin(request: Request, db: Session = Depends(get_db)):
     }
 
     registration_data, state = server.register_begin(
-        user,   
+        user,
         user_verification=UserVerificationRequirement.PREFERRED
     )
 
-    state_store[username] = state
-
+    set_state(username, state)
     jsonified = jsonify_registration_options(registration_data)
     return Response(cbor.encode(jsonified), media_type="application/cbor")
 
@@ -100,7 +106,7 @@ async def register_complete(request: Request, db: Session = Depends(get_db)):
     try:
         data = cbor.decode(await request.body())
         username = data.get("username")
-        state = state_store.get(username)
+        state = get_state(username)
 
         if not state:
             return Response(cbor.encode({"error": "Session expired or invalid"}), media_type="application/cbor", status_code=400)
@@ -121,7 +127,6 @@ async def register_complete(request: Request, db: Session = Depends(get_db)):
             existing.sign_count = sign_count
 
         db.commit()
-
         return Response(cbor.encode({"status": "Registration successful"}), media_type="application/cbor")
 
     except Exception as e:
